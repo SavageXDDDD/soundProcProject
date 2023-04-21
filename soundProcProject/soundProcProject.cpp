@@ -69,6 +69,29 @@ vector<double> hann(int N) {
     return h;
 }
 
+vector<double> hamming(int N) {
+    vector<double> h;
+    double max = 0;
+    for (int n = 0; n < N; n++) {
+        h.push_back(0.54+0.46*cos((2 * M_PI * n)/(N-1)));
+        if (0.54 + 0.46 * cos((2 * M_PI * n) / (N - 1)) > max) max = 0.54 + 0.46 * cos((2 * M_PI * n) / (N - 1));
+    }
+    for (int n = 0; n < N; n++) {
+        h.at(n) = h.at(n) / max;
+    }
+    return h;
+}
+
+vector<double> sinWin(int N) {
+    vector<double> h;
+    vector<double> hannWin = hann(N);
+    vector<double> hamWin = hamming(N);
+    for (int n = 0; n < N; n++) {
+        h.push_back(hannWin.at(n)/hamWin.at(n));
+    }
+    return h;
+}
+
 vector<vector<double>> analyse(vector<double> X, int frameSize, float overlap) {
     vector<vector<double>> y{};
     if (X.size() == 0) {
@@ -188,10 +211,11 @@ vector<double> umodav(vector<double> noise, vector<double> signal, int frameSize
     for (int i = 0; i < splitNoiseFFT.size(); i++) {
         for (int j = 0; j < splitNoiseFFT.at(i).size(); j++) {
             //cout << i << " || " << j << endl;
-            V = (pow(abs(splitSignalFFT.at(i).at(j)), 2) - pow(abs(splitNoiseFFT.at(i).at(j)), 2));
+            V = pow(abs(splitSignalFFT.at(i).at(j)), 2) - pow(abs(splitNoiseFFT.at(i).at(j)), 2) ;
             V > 0 ? Ps.at(i).push_back(V) : Ps.at(i).push_back(0.0);
         }
     }
+    vector<double> sinthWin = sinWin(splitNoise.size());
     vector<complex<double>> IFFTbuf{};
     vector<vector<double>> absIFFT(splitNoise.size());
     for (int i = 0; i < splitNoise.size(); i++) {
@@ -200,12 +224,12 @@ vector<double> umodav(vector<double> noise, vector<double> signal, int frameSize
         transform(Ps.at(i).begin(), Ps.at(i).end(), buf.begin(), [](double da) {
             return std::complex<double>(da, 0); });
         for (int j = 0; j < Ps.at(0).size(); j++) {
-            buf.at(j) = sqrt(buf.at(j)) * exp(arg(splitSignalFFT.at(i).at(j)));
+            buf.at(j) = sqrt(abs(buf.at(j))) * exp(1i*arg(splitSignalFFT.at(i).at(j)));
         }
         IFFTbuf = fast_fourier_transform(buf, true);
         //cout << IFFTbuf.size() << endl;
         for (int j = 0; j < splitNoise.at(i).size(); j++) {
-            absIFFT.at(i).push_back(real(IFFTbuf.at(j)));
+            absIFFT.at(i).push_back(real(IFFTbuf.at(j) * sinthWin.at(j)));
         }
     };
     y = synthesise(absIFFT, frameSize, overlap);
