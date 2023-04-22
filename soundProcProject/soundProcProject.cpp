@@ -101,9 +101,7 @@ vector<vector<double>> analyse(vector<double> X, int frameSize, float overlap) {
     }
     int nFrames = 1 + (X.size() - frameSize) / (frameSize * (1 - overlap));
     vector<double> hannWindow = hann(frameSize);
-    //cout << "nFrames=" << nFrames << endl;
     y.resize(nFrames);
-    int j1 = 0;
     int iStart = 0; int iEnd = frameSize;
     for (int i = 0; i < nFrames; i++) {
         int k = 0;
@@ -113,7 +111,6 @@ vector<vector<double>> analyse(vector<double> X, int frameSize, float overlap) {
         }
         iStart += frameSize * (1 - overlap);
         iEnd += frameSize * (1 - overlap);
-        //cout << i << endl;
     }
     return y;
 }
@@ -132,24 +129,15 @@ vector<double> synthesise(vector<vector<double>> X, int frameSize, float overlap
         cout << "bad frame size, must be greater than 0, empty vector returned" << endl;
         return y;
     }
-    /*
-    vector<double> sinthWin = sinWin(X.at(0).size());
-    for (int i = 0; i < X.size(); i++) {
-        for (int j = 0; j < X.at(i).size(); j++)
-            X.at(i).at(j) = X.at(i).at(j) * sinthWin.at(j);
-    }
-    */
     int iStart = frameSize*(1-overlap)-1; int iEnd = frameSize;
-    cout << y.size() << endl;
     for (int i = 0; i < frameSize; i++) {
         y.push_back(X.at(0).at(i));
     }
-    cout << y.size() << endl;
     for (int i = 1; i < X.size(); i++) {
         for (int j = iStart; j < iEnd; j++) {
             y.at(j) += X.at(i).at(j%frameSize);
         }
-        for (int j = 0; j < frameSize * (1 - overlap) -1; j++) {
+        for (int j = frameSize * (1 - overlap); j < frameSize -1; j++) {
             y.push_back(X.at(i).at(j));
         }
         iStart += frameSize * (1 - overlap);
@@ -186,7 +174,12 @@ vector<double> umodav(vector<double> noise, vector<double> signal, int frameSize
     vector<vector<complex<double>>> splitSignalFFT{};
     vector<complex<double>> buf(splitNoise.at(0).size());
     vector<vector<double>> Ps(splitNoise.size());
+    double Pd;
+    double Px;
     double V;
+    double alpha = 50.0;
+    double beta = 0.0;
+    double gama = 0.05;
     for (int i = 0; i < splitNoise.size(); i++) {
         if (splitNoise.at(i).size() % 2 != 0) {
             splitNoise.at(i).resize(pow(2, ((int)(log2(splitNoise.at(i).size()))) + 1));
@@ -203,10 +196,20 @@ vector<double> umodav(vector<double> noise, vector<double> signal, int frameSize
             return complex<double>(da, 0.0); });
         splitSignalFFT.push_back(fast_fourier_transform(buf));
     };
+    
     for (int i = 0; i < splitNoiseFFT.size(); i++) {
+        Pd = 0.0;
+        Px = 0.0;
+        /*
         for (int j = 0; j < splitNoiseFFT.at(i).size(); j++) {
-            V = pow(abs(splitSignalFFT.at(i).at(j)), 2) - pow(abs(splitNoiseFFT.at(i).at(j)), 2) ;
-            V > 0 ? Ps.at(i).push_back(V) : Ps.at(i).push_back(0.0);
+            Pd += pow(abs(splitNoiseFFT.at(i).at(j)), 2);
+            Px += pow(abs(splitSignalFFT.at(i).at(j)), 2);
+        }
+        Pd = Pd / splitNoiseFFT.at(i).size();
+        */
+        for (int j = 0; j < splitNoiseFFT.at(i).size(); j++) {
+            V = pow(abs(splitSignalFFT.at(i).at(j)), 2) - pow(abs(splitNoiseFFT.at(i).at(j)),2) * alpha;
+            V > beta * pow(abs(splitNoiseFFT.at(i).at(j)), 2) ? Ps.at(i).push_back(V) : Ps.at(i).push_back(beta * pow(abs(splitNoiseFFT.at(i).at(j)), 2));
         }
     }
     vector<complex<double>> IFFTbuf{};
@@ -217,7 +220,8 @@ vector<double> umodav(vector<double> noise, vector<double> signal, int frameSize
             buf.push_back(sqrt(Ps.at(i).at(j)) * exp(1i * arg(splitSignalFFT.at(i).at(j))));
         }
         IFFTbuf = fast_fourier_transform(buf, true);
-        for (int j = 0; j < splitNoise.at(i).size(); j++) {
+        IFFTbuf.resize(frameSize);
+        for (int j = 0; j < frameSize; j++) {
             absIFFT.at(i).push_back(real(IFFTbuf.at(j)));
         }
     };
@@ -243,14 +247,14 @@ int main() {
         cout << "failed to read audio file "<< filePath << endl;
         return 696969;
     }
-    for (int i = 0; i < noiseFile.getNumSamplesPerChannel(); i++)
+    for (int i = 0; i < audioFile.getNumSamplesPerChannel(); i++)
     {
         in.push_back(audioFile.samples[0][i]);
         noise.push_back(noiseFile.samples[0][i]);
     }
     
-    vector<double> z1 = umodav(noise, in, 257, 0.5);
-    cout << z1.size() << endl;
+    //vector<double> z1 = umodav(noise, in, 257, 0.5);
+    vector<double> z1 = synthesise(analyse(in, 257, 0.5), 257, 0.5);
     for (int i = 0; i < z1.size(); i++)
     {
         audioFile.samples[0][i] = z1.at(i);
