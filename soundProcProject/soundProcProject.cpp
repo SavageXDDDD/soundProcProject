@@ -61,7 +61,7 @@ vector<complex<double> > fast_fourier_transform(vector<complex<double> > x, bool
 
 vector<double> hann(int N) {
     vector<double> h;
-    for (int n = 0; n < N; n++) {
+    for (int n = 1; n < N+1; n++) {
         h.push_back(pow(sin(M_PI * n / N), 2));
     }
     return h;
@@ -69,8 +69,8 @@ vector<double> hann(int N) {
 
 vector<double> hamming(int N) {
     vector<double> h;
-    for (int n = 0; n < N; n++) {
-        h.push_back(0.54+0.46*cos((2 * M_PI * n)/(N-1)));
+    for (int n = 1; n < N+1; n++) {
+        h.push_back(0.54-0.46*cos((2 * M_PI * n)/(N-1)));
     }
     return h;
 }
@@ -80,43 +80,58 @@ vector<double> sinWin(int N) {
     vector<double> hannWin = hann(N);
     vector<double> hamWin = hamming(N);
     for (int n = 0; n < N; n++) {
-        h.push_back(hamWin.at(n) / hannWin.at(n));
+        h.push_back(hannWin.at(n) / hamWin.at(n));
     }
     return h;
 }
 
-vector<vector<double>> analyse(vector<double> X, int frameSize, float overlap) {
+vector<vector<complex<double>>> analyse(vector<double> X, int frameSize, float overlap) {
     vector<vector<double>> y{};
+    int nFrames = 1 + floor((X.size() - frameSize) / (frameSize * (1 - overlap)));
+    vector<vector<complex<double>>> result{};
+    vector<vector<complex<double>>> result1{};
     if (X.size() == 0) {
         cout << "empty vector passed, empty vector returned" << endl;
-        return y;
+        return result;
     }
     if (overlap >= 1 || overlap <0) {
         cout << "bad overlap value, must be between 0 and 0.(9), empty vector returned" << endl;
-        return y;
+        return result;
     }
     if (frameSize <= 0) {
         cout << "bad frame size, must be greater than 0, empty vector returned" << endl;
-        return y;
+        return result;
     }
-    int nFrames = 1 + (X.size() - frameSize) / (frameSize * (1 - overlap));
-    vector<double> hannWindow = hann(frameSize);
+    vector<double> hammingWindow = hamming(frameSize);
     y.resize(nFrames);
     int iStart = 0; int iEnd = frameSize;
     for (int i = 0; i < nFrames; i++) {
         int k = 0;
         for (int j = iStart; j < iEnd; j++) {
-            y.at(i).push_back(X.at(j)*hannWindow.at(k));
+            y.at(i).push_back(X.at(j)*hammingWindow.at(k));
             k++;
         }
         iStart += frameSize * (1 - overlap);
         iEnd += frameSize * (1 - overlap);
     }
-    return y;
+    vector<complex<double>> buf;
+    vector<complex<double>> buf1;
+    for (int i = 0; i < nFrames; i++) {
+        buf.clear();
+        buf.resize(frameSize);
+        transform(y.at(i).begin(), y.at(i).end(), buf.begin(), [](double da) {
+            return complex<double>(da, 0.0); });
+        buf1 = fast_fourier_transform(buf);
+        result.push_back(buf1);
+    }
+    result1 = result;
+    return result1;
 }
 
-vector<double> synthesise(vector<vector<double>> X, int frameSize, float overlap) {
-    vector<double> y{};
+vector<double> synthesise(vector<vector<complex<double>>> X, int frameSize, float overlap) {
+    vector<double> y;
+    vector<double> outBuf(frameSize);
+    vector<double> result;
     if (X.size() == 0) {
         cout << "empty vector passed, empty vector returned" << endl;
         return y;
@@ -129,21 +144,39 @@ vector<double> synthesise(vector<vector<double>> X, int frameSize, float overlap
         cout << "bad frame size, must be greater than 0, empty vector returned" << endl;
         return y;
     }
-    int iStart = frameSize*(1-overlap)-1; int iEnd = frameSize;
-    for (int i = 0; i < frameSize; i++) {
-        y.push_back(X.at(0).at(i));
+    vector<complex<double>> buf;
+    vector<complex<double>> buf1;
+    vector<double> Ws = sinWin(frameSize);
+    int hsize = floor(frameSize * (1 - overlap));
+    vector<vector<complex<double>>> ifftFrames;
+    //ifftFrames.reserve(X.size());
+    y.resize((X.size()+1) * overlap * frameSize);
+    for (int i = 0; i < X.size(); i++) {
+        buf.clear(); 
+        buf = X.at(i);
+        buf.resize(hsize+1);
+        for (int j = hsize-1; j > 0; j--) buf.push_back(conj(buf.at(j)));
+        buf1 = fast_fourier_transform(buf, true);
+        for (int j = 0; j < frameSize; j++) buf1.at(j) *= Ws.at(j)/frameSize;
+        ifftFrames.push_back(buf1);
     }
-    for (int i = 1; i < X.size(); i++) {
-        for (int j = iStart; j < iEnd; j++) {
-            y.at(j) += X.at(i).at(j%frameSize);
+    //for (int i = 0; i < ifftFrames.at(0).size(); i++) cout << ifftFrames.at(0).at(i) << endl;
+    //fill(buf.begin(), buf.end(), 0.0);
+    int iStart = 0;
+    for (int i = 0; i < X.size(); i++) {
+        for (int j = 0; j < ifftFrames.at(i).size(); j++) {
+            outBuf.at(j) += real(ifftFrames.at(i).at(j));
+            y.at(iStart + j) = outBuf.at(j);
         }
-        for (int j = frameSize * (1 - overlap); j < frameSize -1; j++) {
-            y.push_back(X.at(i).at(j));
+        for (int j = 0; j < floor(outBuf.size() / 2); j++) {
+            outBuf.at(j) = outBuf.at(j + floor(buf.size() / 2));
         }
-        iStart += frameSize * (1 - overlap);
-        iEnd += frameSize * (1 - overlap);
+        iStart += hsize;
+        fill(outBuf.begin() + hsize, outBuf.end(), 0.0);
     }
-    return y;
+    //for (int i = 54200; i < 54260; i++) cout << y.at(i) << endl;
+    result = y;
+    return result;
 }
 
 vector<double> umodav(vector<double> noise, vector<double> signal, int frameSize, float overlap) {
@@ -168,34 +201,17 @@ vector<double> umodav(vector<double> noise, vector<double> signal, int frameSize
         cout << "bad frame size, must be greater than 0, empty vector returned" << endl;
         return y;
     }
-    vector<vector<double>> splitNoise = analyse(noise, frameSize, overlap);
-    vector<vector<double>> splitSignal = analyse(signal, frameSize, overlap);
-    vector<vector<complex<double>>> splitNoiseFFT{};
-    vector<vector<complex<double>>> splitSignalFFT{};
-    vector<complex<double>> buf(splitNoise.at(0).size());
-    vector<vector<double>> Ps(splitNoise.size());
+    vector<vector<complex<double>>> splitNoiseFFT = analyse(noise, frameSize, overlap);
+    vector<vector<complex<double>>> splitSignalFFT = analyse(signal, frameSize, overlap);
+    vector<complex<double>> buf(splitNoiseFFT.at(0).size());
+    vector<vector<double>> Ps(splitNoiseFFT.size());
+    int hsize = floor(frameSize * (1 - overlap));
     double Pd;
     double Px;
     double V;
     double alpha = 50.0;
     double beta = 0.0;
     double gama = 0.05;
-    for (int i = 0; i < splitNoise.size(); i++) {
-        if (splitNoise.at(i).size() % 2 != 0) {
-            splitNoise.at(i).resize(pow(2, ((int)(log2(splitNoise.at(i).size()))) + 1));
-            splitSignal.at(i).resize(pow(2, ((int)(log2(splitSignal.at(i).size()))) + 1));
-        }  
-        buf.clear();
-        buf.resize(splitNoise.at(0).size());
-        transform(splitNoise.at(i).begin(), splitNoise.at(i).end(), buf.begin(), [](double da) {
-        return complex<double>(da, 0.0); });
-        splitNoiseFFT.push_back(fast_fourier_transform(buf));
-        buf.clear();
-        buf.resize(splitNoise.at(0).size());
-        transform(splitSignal.at(i).begin(), splitSignal.at(i).end(), buf.begin(), [](double da) {
-            return complex<double>(da, 0.0); });
-        splitSignalFFT.push_back(fast_fourier_transform(buf));
-    };
     
     for (int i = 0; i < splitNoiseFFT.size(); i++) {
         Pd = 0.0;
@@ -212,20 +228,18 @@ vector<double> umodav(vector<double> noise, vector<double> signal, int frameSize
             V > beta * pow(abs(splitNoiseFFT.at(i).at(j)), 2) ? Ps.at(i).push_back(V) : Ps.at(i).push_back(beta * pow(abs(splitNoiseFFT.at(i).at(j)), 2));
         }
     }
-    vector<complex<double>> IFFTbuf{};
-    vector<vector<double>> absIFFT(splitNoise.size());
-    for (int i = 0; i < splitNoise.size(); i++) {
+    vector<vector<complex<double>>> IFFTbuf(splitNoiseFFT.size());
+    for (int i = 0; i < splitNoiseFFT.size(); i++) {
         buf.clear();
-        for (int j = 0; j < Ps.at(0).size(); j++) {
+        for (int j = 0; j < hsize+1; j++) {
             buf.push_back(sqrt(Ps.at(i).at(j)) * exp(1i * arg(splitSignalFFT.at(i).at(j))));
         }
-        IFFTbuf = fast_fourier_transform(buf, true);
-        IFFTbuf.resize(frameSize);
-        for (int j = 0; j < frameSize; j++) {
-            absIFFT.at(i).push_back(real(IFFTbuf.at(j)));
+        for (int j = hsize-1; j > 0; j--) {
+            buf.push_back(conj(buf.at(j)));
         }
+        IFFTbuf.push_back(buf);
     };
-    y = synthesise(absIFFT, frameSize, overlap);
+    y = synthesise(IFFTbuf, frameSize, overlap);
     return y;
 }
 
@@ -253,12 +267,22 @@ int main() {
         noise.push_back(noiseFile.samples[0][i]);
     }
     
-    //vector<double> z1 = umodav(noise, in, 257, 0.5);
-    vector<double> z1 = synthesise(analyse(in, 257, 0.5), 257, 0.5);
-    for (int i = 0; i < z1.size(); i++)
-    {
-        audioFile.samples[0][i] = z1.at(i);
-        //audioFile.samples[1][i] = z1.at(i);
+    //vector<double> z1 = umodav(noise, in, 512, 0.5);
+    vector<vector<complex<double>>> a = analyse(in, 512, 0.5);
+    vector<double> z1 = synthesise(a, 512, 0.5);
+    if (audioFile.getNumSamplesPerChannel() < z1.size()) {
+        for (int i = 0; i < audioFile.getNumSamplesPerChannel(); i++)
+        {
+            audioFile.samples[0][i] = z1.at(i);
+            //audioFile.samples[1][i] = z1.at(i);
+        }
+    }
+    else {
+        for (int i = 0; i < z1.size(); i++)
+        {
+            audioFile.samples[0][i] = z1.at(i);
+            //audioFile.samples[1][i] = z1.at(i);
+        }
     }
     audioFile.save("C:\\test\\rst.wav");
     auto end = chrono::high_resolution_clock::now();
