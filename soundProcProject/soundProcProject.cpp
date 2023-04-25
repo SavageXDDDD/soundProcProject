@@ -203,39 +203,38 @@ vector<double> umodav(vector<double> noise, vector<double> signal, int frameSize
     }
     vector<vector<complex<double>>> splitNoiseFFT = analyse(noise, frameSize, overlap);
     vector<vector<complex<double>>> splitSignalFFT = analyse(signal, frameSize, overlap);
+    y.reserve(splitNoiseFFT.size());
     vector<complex<double>> buf(splitNoiseFFT.at(0).size());
-    vector<vector<double>> Ps(splitNoiseFFT.size());
+    vector<vector<complex<double>>> Ps(splitNoiseFFT.size());
     int hsize = floor(frameSize * (1 - overlap));
     double Pd;
     double Px;
     double V;
-    double alpha = 50.0;
-    double beta = 0.0;
+    double alpha = 2.0;
+    double beta = 0.05;
     double gama = 0.05;
-    
     for (int i = 0; i < splitNoiseFFT.size(); i++) {
         Pd = 0.0;
         Px = 0.0;
-        /*
+
         for (int j = 0; j < splitNoiseFFT.at(i).size(); j++) {
             Pd += pow(abs(splitNoiseFFT.at(i).at(j)), 2);
             Px += pow(abs(splitSignalFFT.at(i).at(j)), 2);
         }
         Pd = Pd / splitNoiseFFT.at(i).size();
-        */
         for (int j = 0; j < splitNoiseFFT.at(i).size(); j++) {
-            V = pow(abs(splitSignalFFT.at(i).at(j)), 2) - pow(abs(splitNoiseFFT.at(i).at(j)),2) * alpha;
-            V > beta * pow(abs(splitNoiseFFT.at(i).at(j)), 2) ? Ps.at(i).push_back(V) : Ps.at(i).push_back(beta * pow(abs(splitNoiseFFT.at(i).at(j)), 2));
+            //V = pow(abs(splitSignalFFT.at(i).at(j)), 2) - pow(abs(splitNoiseFFT.at(i).at(j)),2) * alpha;
+            //V > beta * pow(abs(splitNoiseFFT.at(i).at(j)), 2) ? Ps.at(i).push_back(V) : Ps.at(i).push_back(beta * pow(abs(splitNoiseFFT.at(i).at(j)), 2));
+            V = pow(abs(splitSignalFFT.at(i).at(j)), 2) - Pd * alpha;
+            V > beta* Pd ? Ps.at(i).push_back(V) : Ps.at(i).push_back(beta * Pd);
         }
     }
-    vector<vector<complex<double>>> IFFTbuf(splitNoiseFFT.size());
+    vector<vector<complex<double>>> IFFTbuf{};
+    IFFTbuf.reserve(splitNoiseFFT.size());
     for (int i = 0; i < splitNoiseFFT.size(); i++) {
         buf.clear();
-        for (int j = 0; j < hsize+1; j++) {
+        for (int j = 0; j < frameSize; j++) {
             buf.push_back(sqrt(Ps.at(i).at(j)) * exp(1i * arg(splitSignalFFT.at(i).at(j))));
-        }
-        for (int j = hsize-1; j > 0; j--) {
-            buf.push_back(conj(buf.at(j)));
         }
         IFFTbuf.push_back(buf);
     };
@@ -249,7 +248,6 @@ int main() {
     string noisePath = "C:\\test\\noise101.wav";
     AudioFile<double> audioFile;
     AudioFile<double> noiseFile;
-    vector<vector<double>> y { {},{} };
     vector<double> in = {};
     vector<double> noise = {};
     try{
@@ -267,9 +265,9 @@ int main() {
         noise.push_back(noiseFile.samples[0][i]);
     }
     
-    //vector<double> z1 = umodav(noise, in, 512, 0.5);
-    vector<vector<complex<double>>> a = analyse(in, 512, 0.5);
-    vector<double> z1 = synthesise(a, 512, 0.5);
+    vector<double> z1 = umodav(noise, in, 512, 0.5);
+    //vector<vector<complex<double>>> a = analyse(in, 512, 0.5);
+    //vector<double> z1 = synthesise(a, 512, 0.5);
     if (audioFile.getNumSamplesPerChannel() < z1.size()) {
         for (int i = 0; i < audioFile.getNumSamplesPerChannel(); i++)
         {
