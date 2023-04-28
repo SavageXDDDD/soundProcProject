@@ -85,6 +85,14 @@ vector<double> sinWin(int N) {
     return h;
 }
 
+vector<double> convolution(vector<double> x, vector<double> h) {
+    vector<double> y(x.size());
+    for (int i = 0; i < x.size(); i++) {
+        for (int j = 0; j <= i; j++) y.at(i) += x.at(j) * h.at(h.size() - i + j - 1);
+    }
+    return y;
+}
+
 vector<vector<complex<double>>> analyse(vector<double> X, int frameSize, float overlap) {
     vector<vector<double>> y{};
     int nFrames = 1 + floor((X.size() - frameSize) / (frameSize * (1 - overlap)));
@@ -242,17 +250,185 @@ vector<double> umodav(vector<double> noise, vector<double> signal, int frameSize
     return y;
 }
 
+double sinc(double arg) {
+    double y;
+    arg == 0 ? y = 1.0 : y = sin(M_PI * arg) / (M_PI * arg);
+    return y;
+}
+
+vector<double> lowpassFilter(int order, int fc, int fs) {
+    vector<double> h(order);
+    double w = ((double) (2 * fc)) / fs;
+    for (int i = 0; i < order; i++) h.at(i) = w * sinc(w * (i - (double)(order - 1) / 2));
+    return h;
+}
+
+vector<double> echoFilter(vector<double> signal, int fs) {
+    vector <double> y{};
+    double gdry = 0.4; double gwet = 0.6; double gfb = 0.5;
+    int frameSize = 512;
+    int delayFrames = floor(fs/frameSize);
+    int nFrames = floor(signal.size() / frameSize);
+    signal.resize(nFrames * frameSize);
+    vector<double> h = lowpassFilter(512, 1000, 44100);
+    vector<vector<double>> delayBuffer(delayFrames);
+    for (int i = 0; i < delayFrames; i++) {
+        delayBuffer.at(i).resize(frameSize);
+    }
+    vector<double> inputBuffer(frameSize);
+    for (int i = 0; i < nFrames; i++) {
+        for (int j = 0; j < delayFrames-1; j++) {
+            delayBuffer.at(j) = delayBuffer.at(j + 1);
+        }
+        delayBuffer.at(delayFrames - 1) = convolution(delayBuffer.at(delayFrames - 1), h);
+        for (int j = 0; j < frameSize; j++) {
+            delayBuffer.at(delayFrames - 1).at(j) *= gfb;
+            delayBuffer.at(delayFrames - 1).at(j) += inputBuffer.at(j);
+        }
+        for (int j = 0; j < frameSize; j++) {
+            inputBuffer.at(j) = signal.at(frameSize *i+j);
+        }
+        for (int j = 0; j < frameSize; j++) {
+            y.push_back(inputBuffer.at(j) * gdry + delayBuffer.at(0).at(j) * gwet);
+        }
+    }
+    return y;
+}
+
+vector<vector<double>> pingPong(vector<double> signal, int fs) {
+    vector<vector<double>> y(2);
+    double a1 = 0.75; double a2 = 0.25; double a3 = 1.0;
+    double b1 = 0.25; double b2 = 0.25; double b3 = 0.5;
+    int frameSize = 512;
+    int delayFrames = floor(fs / frameSize);
+    int nFrames = floor(signal.size() / frameSize);
+    vector<double> leftBuf; vector<double> rightBuf;
+    signal.resize(nFrames * frameSize);
+    vector<vector<double>> delayBufferLeft(delayFrames);
+    vector<vector<double>> delayBufferRight(delayFrames);
+    for (int i = 0; i < delayFrames; i++) {
+        delayBufferLeft.at(i).resize(frameSize);
+        delayBufferRight.at(i).resize(frameSize);
+    }
+    vector<double> inputBuffer(frameSize);
+    for (int i = 0; i < nFrames; i++) {
+        for (int j = 0; j < delayFrames - 1; j++) {
+            delayBufferLeft.at(j) = delayBufferRight.at(j + 1);
+            delayBufferRight.at(j) = delayBufferLeft.at(j + 1);
+        }
+        for (int j = 0; j < frameSize; j++) {
+            delayBufferLeft.at(delayFrames - 1).at(j) = inputBuffer.at(j) * a1;
+            delayBufferLeft.at(delayFrames - 1).at(j) += delayBufferRight.at(0).at(j) * b2;
+            delayBufferRight.at(delayFrames - 1).at(j) = inputBuffer.at(j) * b1;
+            delayBufferRight.at(delayFrames - 1).at(j) += delayBufferLeft.at(0).at(j) * a2;
+        }
+        for (int j = 0; j < frameSize; j++) {
+            inputBuffer.at(j) = signal.at(frameSize * i + j);
+        }
+        for (int j = 0; j < frameSize; j++) {
+            leftBuf.push_back(inputBuffer.at(j) + a3 * delayBufferLeft.at(0).at(j));
+            rightBuf.push_back(inputBuffer.at(j) + b3 * delayBufferRight.at(0).at(j));
+        }
+    }
+    y.at(0) = leftBuf;
+    y.at(1) = rightBuf;
+    return y;
+}
+
+vector<double> vibratto(vector<double> signal, int fs) {
+    vector <double> y{};
+    int delBuf = 0; int f = 20050;
+    int frameSize = 512;
+    int delayFrames = floor(fs / frameSize);
+    int nFrames = floor(signal.size() / frameSize);
+    signal.resize(nFrames * frameSize);
+    vector<double> h = lowpassFilter(512, 1000, 44100);
+    vector<vector<double>> delayBuffer(delayFrames);
+    for (int i = 0; i < delayFrames; i++) {
+        delayBuffer.at(i).resize(frameSize);
+    }
+    vector<double> inputBuffer(frameSize);
+    for (int i = 0; i < nFrames; i++) {
+        for (int j = 0; j < delayFrames - 1; j++) {
+            delayBuffer.at(j) = delayBuffer.at(j + 1);
+        }
+        for (int j = 0; j < frameSize; j++) {
+            delBuf = (delayFrames - 1) * abs(sin(M_PI/2 + 2 * M_PI * i * f / fs));
+            delayBuffer.at(delBuf).at(j) = inputBuffer.at(j);
+            if (delBuf != delayFrames - 1) delayBuffer.at(delayFrames - 1).at(j) = 0;
+        }
+        for (int j = 0; j < frameSize; j++) {
+            inputBuffer.at(j) = signal.at(frameSize * i + j);
+        }
+        for (int j = 0; j < frameSize; j++) {
+            y.push_back(delayBuffer.at(0).at(j));
+        }
+    }
+    return y;
+}
+
+vector<vector<double>> pane(vector<double> signal, int fs) {
+    vector<vector<double>> y(2);
+    double thetaStart = 0; double thetaEnd = M_PI;
+    vector<double> leftBuf; vector<double> rightBuf;
+    int frameSize = 512;
+    int delayFrames = floor(fs / frameSize);
+    int nFrames = floor(signal.size() / frameSize);
+    double dTheta = (thetaEnd - thetaStart) / nFrames;
+    signal.resize(nFrames * frameSize);
+    vector<double> inputBuffer(frameSize);
+    for (int i = 0; i < nFrames; i++) {
+        for (int j = 0; j < frameSize; j++) {
+            inputBuffer.at(j) = signal.at(frameSize * i + j);
+        }
+        for (int j = 0; j < frameSize; j++) {
+            leftBuf.push_back(inputBuffer.at(j) * (cos(thetaStart+dTheta*i) - sin(thetaStart + dTheta * i)));
+            rightBuf.push_back(inputBuffer.at(j) * (cos(thetaStart + dTheta * i) + sin(thetaStart + dTheta * i)));
+        }
+    }
+    y.at(0) = leftBuf;
+    y.at(1) = rightBuf;
+    return y;
+}
+
+vector<double> heartbeat(vector<double> signal, int fs) {
+    vector<double> pureBeat{}; vector<double> result(signal.size());
+    int Fmd = 18; int F = 1175; double m = 0.9; double A0 = 1;
+    for (int i = 0; i < signal.size(); i++) {
+        pureBeat.push_back(A0*(1 + m * cos(2 * M_PI * Fmd * i / fs)) * cos(2 * M_PI * F * i / fs));
+        result.at(i) = signal.at(i) * pureBeat.at(i);
+    }
+    return result;
+}
+
+vector<double> circularModulation(vector<double> signal, int fs) {
+    vector<double> pureM{};
+    int sign = 1;
+    int fstart = 300; int fend = 800; int fcur = fstart; int step = 30;
+    vector<double> result(signal.size());
+    int Fmd = 18; int F = 1175; double m = 0.9; double A0 = 1;
+    for (int i = 0; i < signal.size(); i++) {
+        if (fcur > fend || fcur < fstart) sign *= -1;
+        fcur += sign * step;
+        pureM.push_back(sin(2 * M_PI * fcur * i / fs));
+        result.at(i) = signal.at(i) * pureM.at(i);
+    }
+    return result;
+}
+
 int main() {
     auto begin = chrono::high_resolution_clock::now();
-    string filePath = "C:\\test\\signal_noise101.wav";
-    string noisePath = "C:\\test\\noise101.wav";
+    //string filePath = "C:\\test\\signal_noise101.wav";
+    string filePath = "C:\\test\\test_signal.wav";
+    //string noisePath = "C:\\test\\noise101.wav";
     AudioFile<double> audioFile;
     AudioFile<double> noiseFile;
+    AudioFile<double> result;
     vector<double> in = {};
     vector<double> noise = {};
     try{
         audioFile.load(filePath);
-        noiseFile.load(noisePath);
+        //noiseFile.load(noisePath);
         audioFile.printSummary();
     }
     catch (exception e) {
@@ -262,12 +438,26 @@ int main() {
     for (int i = 0; i < audioFile.getNumSamplesPerChannel(); i++)
     {
         in.push_back(audioFile.samples[0][i]);
-        noise.push_back(noiseFile.samples[0][i]);
+        //noise.push_back(noiseFile.samples[0][i]);
     }
-    
-    vector<double> z1 = umodav(noise, in, 512, 0.5);
+    vector<double> vib = vibratto(in, 44100);
+    for (int i = 0; i < vib.size(); i++)
+    {
+        audioFile.samples[0][i] = vib.at(i);
+        //audioFile.samples[1][i] = z1.at(i);
+    }
+    vector<vector<double>> rst = pane(in, 44100);
+    result.setNumChannels(2);
+    result.setNumSamplesPerChannel(rst.at(0).size());
+    result.setSampleRate(44100);
+    result.setBitDepth(16);
+    result.samples[0] = rst.at(0);
+    result.samples[1] = rst.at(1);
+    result.printSummary();
+    //vector<double> z1 = umodav(noise, in, 512, 0.5);
     //vector<vector<complex<double>>> a = analyse(in, 512, 0.5);
     //vector<double> z1 = synthesise(a, 512, 0.5);
+    /*
     if (audioFile.getNumSamplesPerChannel() < z1.size()) {
         for (int i = 0; i < audioFile.getNumSamplesPerChannel(); i++)
         {
@@ -282,7 +472,9 @@ int main() {
             //audioFile.samples[1][i] = z1.at(i);
         }
     }
-    audioFile.save("C:\\test\\rst.wav");
+    */
+    audioFile.save("C:\\test\\vibbbb.wav");
+    result.save("C:\\test\\pane.wav");
     auto end = chrono::high_resolution_clock::now();
     auto eslaped = chrono::duration_cast<chrono::microseconds>(end - begin);
     cout << "microseconds " << eslaped.count() << endl;
