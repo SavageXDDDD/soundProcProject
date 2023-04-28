@@ -416,10 +416,65 @@ vector<double> circularModulation(vector<double> signal, int fs) {
     return result;
 }
 
+vector<double> noiseSupressor(vector<double> signal, int frameSize, float overlap) {
+    vector<double> y{};
+    if (signal.size() == 0) {
+        cout << "empty signal vector passed, empty vector returned" << endl;
+        return y;
+    }
+    if (overlap >= 1 || overlap < 0) {
+        cout << "bad overlap value, must be between 0 and 0.(9), empty vector returned" << endl;
+        return y;
+    }
+    if (frameSize <= 0) {
+        cout << "bad frame size, must be greater than 0, empty vector returned" << endl;
+        return y;
+    }
+    vector<vector<complex<double>>> splitSignalFFT = analyse(signal, frameSize, overlap);
+    y.reserve(splitSignalFFT.size());
+    vector<complex<double>> buf(splitSignalFFT.at(0).size());
+    vector<vector<complex<double>>> Ps(splitSignalFFT.size());
+    int hsize = floor(frameSize * (1 - overlap));
+    double Pd = pow(abs(splitSignalFFT.at(0).at(0)), 2);
+    double Px;
+    double V; double THR = 9.50;
+    double alpha = 2.0;
+    double beta = 0.0;
+    double gama = 0.95;
+    double WAD;
+    for (int i = 0; i < splitSignalFFT.size(); i++) {
+        //Pd = 0.0;
+        Px = 0.0;
+        for (int j = 0; j < splitSignalFFT.at(i).size(); j++) {
+            Px += pow(abs(splitSignalFFT.at(i).at(j)), 2);
+        }
+        Px = Px / splitSignalFFT.at(i).size();
+        if (10 * log10(Px / Pd) < THR) Pd = gama * Pd + Px * (1 - gama);
+        WAD=(10 * log10(Px / Pd));
+        for (int j = 0; j < splitSignalFFT.at(i).size(); j++) {
+            V = pow(abs(splitSignalFFT.at(i).at(j)), 2) - Pd;
+            
+            V > 0 ? Ps.at(i).push_back(V) : Ps.at(i).push_back(0);
+        }
+        cout << V << " || " << Pd << endl;
+    }
+    vector<vector<complex<double>>> IFFTbuf{};
+    IFFTbuf.reserve(splitSignalFFT.size());
+    for (int i = 0; i < splitSignalFFT.size(); i++) {
+        buf.clear();
+        for (int j = 0; j < frameSize; j++) {
+            buf.push_back(sqrt(Ps.at(i).at(j)) * exp(1i * arg(splitSignalFFT.at(i).at(j))));
+        }
+        IFFTbuf.push_back(buf);
+    };
+    y = synthesise(IFFTbuf, frameSize, overlap);
+    return y;
+}
+
 int main() {
     auto begin = chrono::high_resolution_clock::now();
-    //string filePath = "C:\\test\\signal_noise101.wav";
-    string filePath = "C:\\test\\test_signal.wav";
+    string filePath = "C:\\test\\signal_noise101.wav";
+    //string filePath = "C:\\test\\test_signal.wav";
     //string noisePath = "C:\\test\\noise101.wav";
     AudioFile<double> audioFile;
     AudioFile<double> noiseFile;
@@ -440,13 +495,15 @@ int main() {
         in.push_back(audioFile.samples[0][i]);
         //noise.push_back(noiseFile.samples[0][i]);
     }
-    vector<double> vib = vibratto(in, 44100);
+    vector<double> z1 = noiseSupressor(in, 512, 0.5);
+    /*vector<double> vib = vibratto(in, 44100);
     for (int i = 0; i < vib.size(); i++)
     {
         audioFile.samples[0][i] = vib.at(i);
         //audioFile.samples[1][i] = z1.at(i);
     }
-    vector<vector<double>> rst = pane(in, 44100);
+    */
+    /*vector<vector<double>> rst = pane(in, 44100);
     result.setNumChannels(2);
     result.setNumSamplesPerChannel(rst.at(0).size());
     result.setSampleRate(44100);
@@ -454,10 +511,11 @@ int main() {
     result.samples[0] = rst.at(0);
     result.samples[1] = rst.at(1);
     result.printSummary();
+    */
     //vector<double> z1 = umodav(noise, in, 512, 0.5);
     //vector<vector<complex<double>>> a = analyse(in, 512, 0.5);
     //vector<double> z1 = synthesise(a, 512, 0.5);
-    /*
+    
     if (audioFile.getNumSamplesPerChannel() < z1.size()) {
         for (int i = 0; i < audioFile.getNumSamplesPerChannel(); i++)
         {
@@ -472,9 +530,9 @@ int main() {
             //audioFile.samples[1][i] = z1.at(i);
         }
     }
-    */
-    audioFile.save("C:\\test\\vibbbb.wav");
-    result.save("C:\\test\\pane.wav");
+    
+    audioFile.save("C:\\test\\NS228.wav");
+    //result.save("C:\\test\\pane.wav");
     auto end = chrono::high_resolution_clock::now();
     auto eslaped = chrono::duration_cast<chrono::microseconds>(end - begin);
     cout << "microseconds " << eslaped.count() << endl;
